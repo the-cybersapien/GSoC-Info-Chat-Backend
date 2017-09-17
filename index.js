@@ -32,12 +32,15 @@ let scktConn = (socket, namespace) => {
 
     // when the client emits 'new message', this listens and executes
     socket.on('new message', (data) => {
-        console.log(namespace + " new message: " + data);
-        // we tell the client to execute 'new message'
-        socket.broadcast.emit('new message', {
+        let message = {
             username: socket.username,
-            message: data
-        });
+            message: data,
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+
+        // we tell the client to execute 'new message'
+        socket.broadcast.emit('new message', message);
+        saveMsgToDb(namespace, message);
     });
 
     // when the client emits 'add user', this listens and executes
@@ -52,6 +55,7 @@ let scktConn = (socket, namespace) => {
             numUsers: numUsers
         });
         // echo globally (all clients) that a person has connected
+        /** @namespace socket.broadcast */
         socket.broadcast.emit('user joined', {
             username: socket.username,
             numUsers: numUsers
@@ -120,17 +124,31 @@ let addRoomToDb = (room, res) => {
 let removeRoomFromDb = (room, res) => {
     mongoClient.connect(url, (err, db) => {
         "use strict";
-        if (err) {
+        if (err)
             res.status(500).json({error: err});
+        else
+            db.collection('rooms')
+                .removeOne(room, (err, ret) => {
+                    if (err) {
+                        res.status(500).json({error: err});
+                    }
+                    db.close();
+                    res.status(200).json(ret);
+                });
+    });
+};
+
+let saveMsgToDb = (room_id, message) => {
+    "use strict";
+    mongoClient.connect(url, (err, db) => {
+        if (err) {
+            // Do Nothing!
+        } else {
+            db.collection('rooms')
+                .updateOne({_id: room_id}, {$push: {messages: message}}, (er, ret) => {
+                    console.log(ret);
+                });
         }
-        db.collection('rooms')
-            .removeOne(room, (err, ret) => {
-                if (err) {
-                    res.status(500).json({error: err});
-                }
-                db.close();
-                res.status(200).json(ret);
-            });
     });
 };
 
@@ -151,11 +169,13 @@ app.post('/new/chatroom', (req, res) => {
     "use strict";
     let body = req.body;
     console.log(body);
+    console.log(body.query);
     let room = {
         _id: generateUniqueID(),
         userId: body.userId,
         username: body.username,
-        query: body.query
+        query: body.query,
+        messages: []
     };
     rooms.push(room);
     addRoomToDb(room, res);
